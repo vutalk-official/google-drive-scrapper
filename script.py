@@ -126,7 +126,7 @@ def process_downloads(queue, stats, matched_cache):
         print(f"\n[{index}/{total_queue}] 📥 Downloading: {file_data['name']}")
         print(f"    💾 Size: {format_size(file_data['size'])} | ⏳ Remaining in Queue: {total_queue - index}")
         
-        download_url = f"https://www.googleapis.com/drive/v3/files/{file_data['id']}?alt=media&key={API_KEY}"
+        download_url = f"https://drive.google.com/uc?id={file_data['id']}&export=download"
         success = False
         
         for attempt in range(1, 4):
