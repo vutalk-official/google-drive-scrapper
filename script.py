@@ -6,7 +6,7 @@ import sys
 API_KEY = "AIzaSyC-pCOghTQ3JAwE7SAI_Gq3cCEIvtuu2z4"
 A1_SOURCE_ID = "1GuXRTz8idMNHV99IhTtUDaxEMlGGInTJ"
 A2_DEST_ID = "1KOWhnJUlOYR12yD0OQYWgJ3cxXzg1bDo"
-LOCAL_SAVE_DIR = r"D:\8th semester\Files-backup"
+LOCAL_SAVE_DIR = r"C:\Backup-files"
 BLOCK_WORDS = ["paradox", "toolkit"]
 
 CACHE_FILE = os.path.join(LOCAL_SAVE_DIR, "matched_files_cache.txt")
@@ -60,7 +60,8 @@ def get_a2_files(folder_id, scan_stats=None):
             break
     return existing_names
 
-def build_download_queue(source_id, a2_set, current_path, queue, stats, matched_cache):
+# 🛠️ Fix: Added 'queued_names' parameter to track duplicates safely
+def build_download_queue(source_id, a2_set, current_path, queue, stats, matched_cache, queued_names):
     url = "https://www.googleapis.com/drive/v3/files"
     page_token = None
     while True:
@@ -77,12 +78,11 @@ def build_download_queue(source_id, a2_set, current_path, queue, stats, matched_
             if item['mimeType'] == 'application/vnd.google-apps.folder':
                 new_path = os.path.join(current_path, name)
                 os.makedirs(new_path, exist_ok=True)
-                build_download_queue(item['id'], a2_set, new_path, queue, stats, matched_cache)
+                build_download_queue(item['id'], a2_set, new_path, queue, stats, matched_cache, queued_names)
             else:
                 stats['total_a1_files'] += 1
                 
                 if stats['total_a1_files'] % 100 == 0:
-                    # Added spaces at the end to prevent visual glitch
                     sys.stdout.write(f"\r🔄 Scanning A1 & Local Disk: Checked {stats['total_a1_files']} files...          ")
                     sys.stdout.flush()
                 
@@ -96,6 +96,10 @@ def build_download_queue(source_id, a2_set, current_path, queue, stats, matched_
                 if lower_name in matched_cache:
                     stats['already_downloaded'] += 1
                     stats['already_downloaded_size'] += file_size
+                    continue
+                
+                # 🛡️ NEW CHECK: Direct skip if file is already added to queue (Duplicate Prevention)
+                if lower_name in queued_names:
                     continue
                 
                 final_path = os.path.join(current_path, name)
@@ -112,6 +116,9 @@ def build_download_queue(source_id, a2_set, current_path, queue, stats, matched_
                     queue.append({'id': item['id'], 'name': name, 'size': file_size, 'path': final_path})
                     stats['pending_downloads'] += 1
                     stats['pending_size'] += file_size
+                    
+                    # 🛡️ Register in queued_names (Not in matched_cache) so it skips next duplicate
+                    queued_names.add(lower_name)
                         
         page_token = res.get('nextPageToken')
         if not page_token:
@@ -141,11 +148,11 @@ def process_downloads(queue, stats, matched_cache):
                                 downloaded_size += len(chunk)
                                 if file_data['size'] > 0:
                                     percent = int((downloaded_size / file_data['size']) * 100)
-                                    # Added spaces here to prevent "MBB" glitch
                                     sys.stdout.write(f"\r    🔄 Progress: [{percent}%] {format_size(downloaded_size)} / {format_size(file_data['size'])}          ")
                                     sys.stdout.flush()
                 
-                os.rename(temp_path, final_path)
+                # 🛠️ Fix: Safely overwrite files without giving [WinError 183]
+                os.replace(temp_path, final_path)
                 print(f"\n    ✅ Success!")
                 stats['success_count'] += 1
                 
@@ -157,7 +164,6 @@ def process_downloads(queue, stats, matched_cache):
                 break
                 
             except requests.exceptions.HTTPError as e:
-                # Yeh naya block humein Google ki taraf se aane wala EXACT error batayega (403 ki asli wajah)
                 print(f"\n    ⚠️ Attempt {attempt}/3 Failed: {e}")
                 print(f"    🔍 Google Says: {e.response.text}")
                 if os.path.exists(temp_path):
@@ -210,11 +216,12 @@ queue_stats = {
     'pending_downloads': 0, 'pending_size': 0
 }
 download_queue = []
+queued_names_set = set() # 🛠️ NEW: Duplicate file tracker
 
 print("==================================================")
 print("🚀 PHASE 2: SCANNING A1 & CHECKING LOCAL STORAGE")
 print("==================================================")
-build_download_queue(A1_SOURCE_ID, a2_files_set, LOCAL_SAVE_DIR, download_queue, queue_stats, matched_cache_set)
+build_download_queue(A1_SOURCE_ID, a2_files_set, LOCAL_SAVE_DIR, download_queue, queue_stats, matched_cache_set, queued_names_set)
 print("\n\n✅ Scan & Comparison Complete!\n")
 
 print("==================================================")
